@@ -1,0 +1,189 @@
+from blog.models import Category, Comment, Post, User
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
+from django.shortcuts import (get_list_or_404, get_object_or_404, redirect,
+                              render)
+from django.urls import reverse, reverse_lazy
+from django.utils import timezone
+from django.views.generic import CreateView, DeleteView, DetailView, UpdateView
+
+from blogicum.constants import POSTS_INDEX
+
+from .forms import CommentForm, PostForm, ProfileEditForm
+
+
+class OnlyAuthorMixin(UserPassesTestMixin):
+
+    def test_func(self):
+        object = self.get_object()
+        return object.author == self.request.user
+   
+
+def index(request):
+    post_list = Post.custom_manager.order_by(
+        '-pub_date')
+
+    paginator = Paginator(post_list, 10)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    context = {'page_obj': page_obj}
+    return render(request, 'blog/index.html', context)
+
+
+class PostDetailView(DetailView):
+    model = Post
+    template_name = 'blog/detail.html'
+    context_object_name = 'post'
+    pk_url_kwarg = 'post_id'
+
+    def get_object(self, queryset=None):
+        post = get_object_or_404(self.model, id=self.kwargs[self.pk_url_kwarg])
+        if post.author == self.request.user:
+            return post
+        return get_object_or_404(Post.custom_manager, id=self.kwargs[self.pk_url_kwarg])
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['form'] = CommentForm()
+        # Дополнительно подгружаем авторов комментариев для текущего поста
+        context['comments'] = self.object.comments.select_related('author')
+
+        return context
+
+
+def category_posts(request, category_slug):
+    category = get_object_or_404(
+        Category, slug=category_slug, is_published=True
+    )
+    posts = Post.custom_manager.filter(category=category).order_by(
+                '-pub_date')
+    # post = Post.objects.select_related('category')
+    paginator = Paginator(posts, 10)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    context = {
+        'category': category,
+        'page_obj': page_obj,
+    }
+
+    return render(request, 'blog/category.html', context)
+
+
+def get_profile(request, username):
+    profile = get_object_or_404(User, username=username)
+    user_posts = Post.objects.select_related('author').filter(author__username=username).order_by(
+        '-pub_date')
+    if not request.user.is_authenticated:
+        user_posts = Post.objects.select_related('author').filter(
+            author__username=username, pub_date__lte=timezone.now(), is_published=True).order_by('-pub_date')
+
+    paginator = Paginator(user_posts, 10)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+
+    context = {
+        'profile': profile,
+        'page_obj': page_obj,
+    }
+    return render(request, 'blog/profile.html', context)
+
+
+class PostCreateView(LoginRequiredMixin, CreateView):
+    model = Post
+    form_class = PostForm
+    # pk_url_kwarg = 'post_id'
+    template_name = 'blog/create.html'
+    # success_url = reverse_lazy('blog:profile')
+
+    def form_valid(self, form):
+        form.instance.author = self.request.user
+        post = form.save(commit=False)
+        post.pub_date = timezone.now()
+        post.save()
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        user = self.request.user.username
+        return reverse_lazy('blog:profile', kwargs={'username': user})
+
+
+class PostUpdateView(OnlyAuthorMixin, UpdateView):
+    model = Post
+    form_class = PostForm
+    template_name = 'blog/create.html'
+    pk_url_kwarg = 'post_id'
+    #success_url = reverse_lazy('blog:profile')
+
+    def handle_no_permission(self):
+        return redirect('blog:post_detail', post_id=self.kwargs[self.pk_url_kwarg])
+    
+    def get_success_url(self):
+        return reverse('blog:post_detail', kwargs={'post_id': self.kwargs[self.pk_url_kwarg]})
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['form'] = PostForm(instance=self.object)
+        return context
+    """
+    def handle_no_permission(self):
+        if not self.request.user.is_authenticated:
+            return redirect('blog:post_detail', post_id=self.kwargs.get('post_id'))
+        else:
+            return super().handle_no_permission()
+"""
+
+class PostDeleteView(OnlyAuthorMixin, DeleteView):
+    model = Post
+    template_name = 'blog/create.html'
+    pk_url_kwarg = 'post_id'
+    success_url = reverse_lazy('blog:index')
+
+
+@login_required
+def add_comment(request, post_id):
+    post = get_object_or_404(Post, id=post_id)
+
+    if request.method == 'POST':
+        form = CommentForm(request.POST)
+        if form.is_valid():
+            comment = form.save(commit=False)
+            comment.author = request.user
+            comment.post = post
+            comment.save()
+            return redirect('blog:post_detail', post_id=post_id)
+    else:
+        form = CommentForm()
+
+    return render(request, 'blog/detail.html', {'form': form, 'post': post})
+
+
+class CommentUpdateView(OnlyAuthorMixin, UpdateView):
+    model = Comment
+    form_class = CommentForm
+    template_name = 'blog/comment.html'
+    pk_url_kwarg = 'comment_id'
+    success_url = reverse_lazy('blog:index')
+
+
+class CommentDeleteView(OnlyAuthorMixin, DeleteView):
+    model = Comment
+    template_name = 'blog/comment.html'
+    pk_url_kwarg = 'comment_id'
+    success_url = reverse_lazy('blog:index')
+
+
+@login_required
+def edit_profile(request):
+    if request.user.is_authenticated:
+        if request.method == 'POST':
+            form = ProfileEditForm(request.POST, instance=request.user)
+            if form.is_valid():
+                form.save()
+                return redirect('blog:index')
+        else:
+            form = ProfileEditForm(instance=request.user)
+        return render(request, 'blog/user.html', {'form': form})
+    else:
+        return redirect('blog:index')
