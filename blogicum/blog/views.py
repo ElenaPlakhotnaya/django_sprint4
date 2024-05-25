@@ -1,16 +1,13 @@
-from blog.models import Category, Comment, Post, User
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.shortcuts import (get_list_or_404, get_object_or_404, redirect,
-                              render)
+from django.shortcuts import (get_object_or_404, redirect, render)
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views.generic import CreateView, DeleteView, DetailView, UpdateView
 
+from blog.models import Category, Comment, Post, User
 from blogicum.constants import POSTS_INDEX
-
 from .forms import CommentForm, PostForm, ProfileEditForm
 
 
@@ -19,7 +16,7 @@ class OnlyAuthorMixin(UserPassesTestMixin):
     def test_func(self):
         object = self.get_object()
         return object.author == self.request.user
-   
+
 
 def index(request):
     post_list = Post.custom_manager.order_by(
@@ -39,16 +36,21 @@ class PostDetailView(DetailView):
     pk_url_kwarg = 'post_id'
 
     def get_object(self, queryset=None):
-        post = get_object_or_404(self.model, id=self.kwargs[self.pk_url_kwarg])
+        post = get_object_or_404(
+            self.model, id=self.kwargs[self.pk_url_kwarg]
+        )
         if post.author == self.request.user:
             return post
-        return get_object_or_404(Post.custom_manager, id=self.kwargs[self.pk_url_kwarg])
+        return get_object_or_404(
+            Post.custom_manager, id=self.kwargs[self.pk_url_kwarg]
+        )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['form'] = CommentForm()
-        # Дополнительно подгружаем авторов комментариев для текущего поста
-        context['comments'] = self.object.comments.select_related('author')
+        context['comments'] = self.object.comments.select_related(
+            'author'
+        )
 
         return context
 
@@ -57,8 +59,10 @@ def category_posts(request, category_slug):
     category = get_object_or_404(
         Category, slug=category_slug, is_published=True
     )
-    posts = Post.custom_manager.filter(category=category).order_by(
-                '-pub_date')
+    posts = Post.custom_manager.filter(
+        category=category).order_by(
+        '-pub_date'
+    )
     # post = Post.objects.select_related('category')
     paginator = Paginator(posts, 10)
     page_number = request.GET.get('page')
@@ -73,11 +77,15 @@ def category_posts(request, category_slug):
 
 def get_profile(request, username):
     profile = get_object_or_404(User, username=username)
-    user_posts = Post.objects.select_related('author').filter(author__username=username).order_by(
-        '-pub_date')
+    user_posts = Post.objects.select_related('author').filter(
+        author__username=username).order_by(
+        '-pub_date'
+    )
     if not request.user.is_authenticated:
         user_posts = Post.objects.select_related('author').filter(
-            author__username=username, pub_date__lte=timezone.now(), is_published=True).order_by('-pub_date')
+            author__username=username,
+            pub_date__lte=timezone.now(),
+            is_published=True).order_by('-pub_date')
 
     paginator = Paginator(user_posts, 10)
     page_number = request.GET.get('page')
@@ -93,9 +101,7 @@ def get_profile(request, username):
 class PostCreateView(LoginRequiredMixin, CreateView):
     model = Post
     form_class = PostForm
-    # pk_url_kwarg = 'post_id'
     template_name = 'blog/create.html'
-    # success_url = reverse_lazy('blog:profile')
 
     def form_valid(self, form):
         form.instance.author = self.request.user
@@ -114,25 +120,24 @@ class PostUpdateView(OnlyAuthorMixin, UpdateView):
     form_class = PostForm
     template_name = 'blog/create.html'
     pk_url_kwarg = 'post_id'
-    #success_url = reverse_lazy('blog:profile')
 
     def handle_no_permission(self):
-        return redirect('blog:post_detail', post_id=self.kwargs[self.pk_url_kwarg])
-    
+        return redirect(
+            'blog:post_detail',
+            post_id=self.kwargs[self.pk_url_kwarg]
+        )
+
     def get_success_url(self):
-        return reverse('blog:post_detail', kwargs={'post_id': self.kwargs[self.pk_url_kwarg]})
-    
+        return reverse(
+            'blog:post_detail',
+            kwargs={'post_id': self.kwargs[self.pk_url_kwarg]}
+        )
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['form'] = PostForm(instance=self.object)
         return context
-    """
-    def handle_no_permission(self):
-        if not self.request.user.is_authenticated:
-            return redirect('blog:post_detail', post_id=self.kwargs.get('post_id'))
-        else:
-            return super().handle_no_permission()
-"""
+
 
 class PostDeleteView(OnlyAuthorMixin, DeleteView):
     model = Post

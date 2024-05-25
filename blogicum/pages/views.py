@@ -20,12 +20,3 @@ class AboutView(TemplateView):
 
 class RulesView(TemplateView):
     template_name = 'pages/rules.html'
-
-
-"""
-def about(request):
-    return render(request, 'pages/about.html')
-
-def rules(request):
-    return render(request, 'pages/rules.html')
-"""

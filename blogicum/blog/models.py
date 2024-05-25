@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.db import models
-from django.urls import reverse, reverse_lazy
+from django.urls import reverse
 from django.utils import timezone
 
 from blogicum.constants import LENGTH_CHAR
@@ -104,7 +104,6 @@ class Post(PublicationInfoModel):
         verbose_name_plural = 'Публикации'
 
     def get_absolute_url(self):
-        # С помощью функции reverse() возвращаем URL объекта.
         return reverse('blog:post_detail', kwargs={'post_id': self.pk})
 
     def __str__(self):
