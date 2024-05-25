@@ -7,7 +7,6 @@ from django.utils import timezone
 from django.views.generic import CreateView, DeleteView, DetailView, UpdateView
 
 from blog.models import Category, Comment, Post, User
-from blogicum.constants import POSTS_INDEX
 from .forms import CommentForm, PostForm, ProfileEditForm
 
 
