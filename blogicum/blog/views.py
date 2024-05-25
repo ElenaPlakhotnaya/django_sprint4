@@ -1,12 +1,14 @@
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.core.paginator import Paginator
+from django.db.models import Count
 from django.shortcuts import (get_object_or_404, redirect, render)
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views.generic import CreateView, DeleteView, DetailView, UpdateView
 
 from blog.models import Category, Comment, Post, User
+from blogicum.constants import PAGINATOR
 from .forms import CommentForm, PostForm, ProfileEditForm
 
 
@@ -18,10 +20,11 @@ class OnlyAuthorMixin(UserPassesTestMixin):
 
 
 def index(request):
-    post_list = Post.custom_manager.order_by(
-        '-pub_date')
-
-    paginator = Paginator(post_list, 10)
+    post_list = Post.custom_manager.annotate(
+        comment_count=Count('comments')).order_by(
+        '-pub_date'
+    )
+    paginator = Paginator(post_list, PAGINATOR)
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
     context = {'page_obj': page_obj}
@@ -45,12 +48,14 @@ class PostDetailView(DetailView):
         )
 
     def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['form'] = CommentForm()
-        context['comments'] = self.object.comments.select_related(
-            'author')
+        comment_form = CommentForm()
+        comments = self.object.comments.select_related('author')
 
-        return context
+        return {
+            **super().get_context_data(**kwargs),
+            'form': comment_form,
+            'comments': comments,
+        }
 
 
 def category_posts(request, category_slug):
@@ -61,8 +66,7 @@ def category_posts(request, category_slug):
         category=category).order_by(
         '-pub_date'
     )
-    # post = Post.objects.select_related('category')
-    paginator = Paginator(posts, 10)
+    paginator = Paginator(posts, PAGINATOR)
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
     context = {
@@ -75,17 +79,14 @@ def category_posts(request, category_slug):
 
 def get_profile(request, username):
     profile = get_object_or_404(User, username=username)
-    user_posts = Post.objects.select_related('author').filter(
-        author__username=username).order_by(
-        '-pub_date'
-    )
+    user_posts = profile.posts.select_related('author').annotate(
+        comment_count=Count('comments')).order_by('-pub_date')
     if not request.user.is_authenticated:
-        user_posts = Post.objects.select_related('author').filter(
-            author__username=username,
+        user_posts = profile.posts.select_related('author').filter(
             pub_date__lte=timezone.now(),
             is_published=True).order_by('-pub_date')
 
-    paginator = Paginator(user_posts, 10)
+    paginator = Paginator(user_posts, PAGINATOR)
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
 
@@ -110,7 +111,7 @@ class PostCreateView(LoginRequiredMixin, CreateView):
 
     def get_success_url(self):
         user = self.request.user.username
-        return reverse_lazy('blog:profile', kwargs={'username': user})
+        return reverse('blog:profile', kwargs={'username': user})
 
 
 class PostUpdateView(OnlyAuthorMixin, UpdateView):
@@ -179,14 +180,11 @@ class CommentDeleteView(OnlyAuthorMixin, DeleteView):
 
 @login_required
 def edit_profile(request):
-    if request.user.is_authenticated:
-        if request.method == 'POST':
-            form = ProfileEditForm(request.POST, instance=request.user)
-            if form.is_valid():
-                form.save()
-                return redirect('blog:index')
-        else:
-            form = ProfileEditForm(instance=request.user)
-        return render(request, 'blog/user.html', {'form': form})
+    if request.method == 'POST':
+        form = ProfileEditForm(request.POST, instance=request.user)
+        if form.is_valid():
+            form.save()
+            return redirect('blog:index')
     else:
-        return redirect('blog:index')
+        form = ProfileEditForm(instance=request.user)
+        return render(request, 'blog/user.html', {'form': form})

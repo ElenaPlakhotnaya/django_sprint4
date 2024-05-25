@@ -92,10 +92,6 @@ class Post(PublicationInfoModel):
         related_name='posts',
     )
 
-    @property
-    def comment_count(self):
-        return self.comments.count()
-
     objects = models.Manager()
     custom_manager = CustomPostManager()
 
@@ -119,7 +115,8 @@ class Comment(models.Model):
     )
     author = models.ForeignKey(
         User,
-        on_delete=models.CASCADE
+        on_delete=models.CASCADE,
+        related_name='comments'
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
